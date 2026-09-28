@@ -17,9 +17,12 @@ jobs:
         run: pip install platformio
       - name: Build firmware
         run: pio run -e esp32-s3-devkitc-1
+      - name: Install esptool
+        run: pip install esptool
+
       - name: Create merged flash image
         run: |
-          esptool merge-bin \
+          python -m esptool merge-bin \
             -o .pio/build/esp32-s3-devkitc-1/WiFi_Receiver_S3-N16R8-merged.bin \
             0x0000 .pio/build/esp32-s3-devkitc-1/bootloader.bin \
             0x8000 .pio/build/esp32-s3-devkitc-1/partitions.bin \
