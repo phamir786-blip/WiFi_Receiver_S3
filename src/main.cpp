@@ -105,13 +105,42 @@ static void sendText(const IPAddress& ip, uint16_t port, const char* msg) {
 static void sendDiscovery() {
   IPAddress group;
   group.fromString(DISCOVERY_GROUP);
+
   char msg[256];
   snprintf(msg, sizeof(msg),
     "WIFI_AUDIO_STREAMER_DISCOVERY;%s;UNICAST;%u;protocols=WFAS;sr=%d;ch=%d;bd=%d;auth=OFF;enc=0",
     HOSTNAME, STREAM_PORT, SAMPLE_RATE, CHANNELS, BITS);
-  discoveryUdp.beginPacket(group, DISCOVERY_PORT);
-  discoveryUdp.write((const uint8_t*)msg, strlen(msg));
-  discoveryUdp.endPacket();
+
+  // WFAS v2 discovery beacon: multicast to 239.255.0.1:9091.
+  if (discoveryUdp.beginPacket(group, DISCOVERY_PORT)) {
+    discoveryUdp.write((const uint8_t*)msg, strlen(msg));
+    discoveryUdp.endPacket();
+  }
+
+  // Send a second copy immediately, matching the Android/desktop discovery
+  // behaviour so one lost multicast frame does not hide the receiver.
+  delay(20);
+  if (discoveryUdp.beginPacket(group, DISCOVERY_PORT)) {
+    discoveryUdp.write((const uint8_t*)msg, strlen(msg));
+    discoveryUdp.endPacket();
+  }
+
+  // Fallback for access points that filter IPv4 multicast: also announce on
+  // the local subnet broadcast address. Android listens on UDP 9091 as well.
+  IPAddress ip = WiFi.localIP();
+  IPAddress mask = WiFi.subnetMask();
+  IPAddress broadcast(
+    (uint8_t)(ip[0] | (uint8_t)~mask[0]),
+    (uint8_t)(ip[1] | (uint8_t)~mask[1]),
+    (uint8_t)(ip[2] | (uint8_t)~mask[2]),
+    (uint8_t)(ip[3] | (uint8_t)~mask[3])
+  );
+  delay(20);
+  if (discoveryUdp.beginPacket(broadcast, DISCOVERY_PORT)) {
+    discoveryUdp.write((const uint8_t*)msg, strlen(msg));
+    discoveryUdp.endPacket();
+  }
+
   lastDiscoveryMs = millis();
 }
 
@@ -522,7 +551,11 @@ void setup() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   udp.begin(STREAM_PORT);
-  discoveryUdp.begin(0);
+
+  // Bind discovery to the connected Wi-Fi interface.
+  if (!discoveryUdp.begin(WiFi.localIP(), 0)) {
+    Serial.println("[WFAS] Discovery UDP bind failed.");
+  }
   startWeb();
   sendDiscovery();
 
