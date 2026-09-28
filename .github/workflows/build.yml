@@ -18,21 +18,26 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32-s3-devkitc-1
       - name: Create merged flash image
+        shell: bash
         run: |
-          BUILD=.pio/build/esp32-s3-devkitc-1
+          BUILD="$PWD/.pio/build/esp32-s3-devkitc-1"
+          FRAMEWORK="$HOME/.platformio/packages/framework-arduinoespressif32"
           test -f "$BUILD/bootloader.bin"
           test -f "$BUILD/partitions.bin"
-          test -f "$BUILD/boot_app0.bin"
           test -f "$BUILD/firmware.bin"
-          pio pkg exec --package "platformio/tool-esptoolpy" -- \
-            esptool.py --chip esp32s3 merge_bin \
-            --format raw \
-            --flash-size 16MB \
+          test -f "$FRAMEWORK/tools/partitions/boot_app0.bin"
+          pio pkg exec --package "platformio/tool-esptoolpy" -- esptool.py \
+            --chip esp32s3 merge_bin \
             -o "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin" \
+            --pad-to-size 16MB \
+            --flash-mode keep \
+            --flash-freq keep \
+            --flash-size keep \
             0x0000 "$BUILD/bootloader.bin" \
             0x8000 "$BUILD/partitions.bin" \
-            0xE000 "$BUILD/boot_app0.bin" \
+            0xE000 "$FRAMEWORK/tools/partitions/boot_app0.bin" \
             0x10000 "$BUILD/firmware.bin"
+          test -s "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin"
           ls -lh "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin"
 
       - name: Upload firmware artifacts
