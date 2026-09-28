@@ -48,6 +48,9 @@ uint32_t lastDiscoveryMs = 0;
 uint32_t streamStartedMs = 0;
 uint32_t underruns = 0;
 bool playbackStarted = false;
+volatile bool uiPaused = false;
+volatile bool uiMuted = false;
+volatile uint8_t uiVolume = 100;
 
 static void rbReset() {
   portENTER_CRITICAL(&rbMux);
@@ -164,6 +167,16 @@ static void audioTask(void*) {
       primed = false;
       playbackStarted = false;
       continue;
+    }
+
+    if (uiPaused || uiMuted || uiVolume == 0) {
+      memset(block, 0, n);
+    } else if (uiVolume < 100) {
+      int16_t* samples = reinterpret_cast<int16_t*>(block);
+      size_t sampleCount = n / sizeof(int16_t);
+      for (size_t i = 0; i < sampleCount; ++i) {
+        samples[i] = (int16_t)(((int32_t)samples[i] * uiVolume) / 100);
+      }
     }
 
     size_t written = 0;
@@ -344,35 +357,96 @@ static void serviceUdp() {
   }
 }
 
+static void handleApiStatus() {
+  String json = "{";
+  json += "\"connected\":" + String(clientConnected ? "true" : "false");
+  json += ",\"paused\":" + String(uiPaused ? "true" : "false");
+  json += ",\"muted\":" + String(uiMuted ? "true" : "false");
+  json += ",\"volume\":" + String(uiVolume);
+  json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  json += ",\"sender\":\"" + String(clientConnected ? activeClient.toString() : "Waiting") + "\"";
+  json += ",\"packets\":" + String(packetsRx);
+  json += ",\"lost\":" + String(packetsLost);
+  json += ",\"underruns\":" + String(underruns);
+  json += ",\"buffer\":" + String(rbAvailable());
+  json += "}";
+  web.send(200, "application/json", json);
+}
+
+static void handleApiControl() {
+  if (web.hasArg("pause")) uiPaused = web.arg("pause") == "1";
+  if (web.hasArg("mute")) uiMuted = web.arg("mute") == "1";
+  if (web.hasArg("volume")) {
+    int v = constrain(web.arg("volume").toInt(), 0, 100);
+    uiVolume = (uint8_t)v;
+    if (v > 0) uiMuted = false;
+  }
+  web.send(200, "application/json", "{\"ok\":true}");
+}
+
 static String htmlPage() {
   String s;
-  s.reserve(5000);
-  s += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-         "<title>WiFi Audio Receiver S3</title><style>"
-         "body{font-family:system-ui;background:#070b12;color:#eee;max-width:700px;margin:40px auto;padding:20px}"
-         ".card{background:#111827;border:1px solid #263244;border-radius:18px;padding:20px;margin:14px 0}"
-         "h1{font-size:24px}.ok{color:#34d399}.muted{color:#9ca3af}code{color:#fbbf24}"
-         "a,button{background:#f59e0b;color:#111827;border:0;border-radius:10px;padding:10px 14px;font-weight:700}"
-         "input{width:100%;padding:10px;background:#0b1220;color:white;border:1px solid #334155;border-radius:10px;box-sizing:border-box}"
-         "</style></head><body>");
-  s += F("<h1>WiFi Audio Receiver S3</h1><div class='card'>");
-  s += "<b>Status:</b> <span class='ok'>";
-  s += clientConnected ? "STREAMING / CONNECTED" : "WAITING FOR ANDROID";
-  s += F("</span><br><br><b>IP:</b> ");
-  s += WiFi.localIP().toString();
-  s += F("<br><b>Hostname:</b> ");
+  s.reserve(12000);
+  s += F(R"rawliteral(
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WiFi Receiver S3</title>
+<style>
+:root{color-scheme:dark;--bg:#050609;--card:#111318;--line:#262a33;--text:#f5f5f5;--muted:#9297a3;--accent:#d7ff45}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -10%,#20251b 0,#08090b 38%,#050609 75%);color:var(--text);font-family:system-ui,-apple-system,sans-serif}
+main{max-width:480px;margin:auto;padding:22px 16px 36px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.brand{font-weight:800;font-size:18px}.live{font-size:11px;border:1px solid #394029;border-radius:20px;padding:6px 10px;color:var(--accent)}
+.art{height:360px;border-radius:28px;overflow:hidden;position:relative;background:linear-gradient(145deg,#1c2415,#080a08 58%,#171a12);border:1px solid #30352a;box-shadow:0 20px 60px #0008}
+.art:before,.art:after{content:"";position:absolute;border-radius:50%;filter:blur(1px)}
+.art:before{width:250px;height:250px;background:radial-gradient(circle,#d7ff45 0,transparent 66%);opacity:.17;top:-55px;right:-55px}
+.art:after{width:220px;height:220px;background:radial-gradient(circle,#fff 0,transparent 65%);opacity:.06;bottom:-90px;left:-70px}
+.cover{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;padding:25px}
+.wave{display:flex;gap:5px;align-items:center;height:70px;margin-bottom:18px}.bar{width:6px;border-radius:10px;background:var(--accent);opacity:.8;animation:b 1.1s ease-in-out infinite alternate}
+.bar:nth-child(1){height:25%;animation-delay:.1s}.bar:nth-child(2){height:55%;animation-delay:.3s}.bar:nth-child(3){height:80%;animation-delay:.2s}.bar:nth-child(4){height:42%;animation-delay:.4s}.bar:nth-child(5){height:95%;animation-delay:.15s}.bar:nth-child(6){height:65%;animation-delay:.35s}.bar:nth-child(7){height:35%;animation-delay:.25s}.bar:nth-child(8){height:72%;animation-delay:.45s}.bar:nth-child(9){height:48%;animation-delay:.05s}.bar:nth-child(10){height:88%;animation-delay:.3s}
+@keyframes b{to{transform:scaleY:.35}}
+.kicker{font-size:11px;letter-spacing:2px;color:var(--accent);font-weight:800}.title{font-size:28px;font-weight:850;margin-top:6px}.sub{color:var(--muted);margin-top:3px}
+.card{background:#0e1014cc;border:1px solid var(--line);border-radius:20px;padding:16px;margin-top:14px}
+.controls{display:flex;align-items:center;justify-content:center;gap:14px}.btn{border:0;border-radius:50%;width:48px;height:48px;background:#20232a;color:white;font-size:18px}.play{width:64px;height:64px;background:var(--accent);color:#080900;font-size:25px}
+.row{display:flex;justify-content:space-between;align-items:center;font-size:13px}.label{color:var(--muted)}input[type=range]{width:100%;accent-color:var(--accent);margin-top:13px}
+.status{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stat{background:#15171c;border-radius:14px;padding:12px}.stat b{display:block;font-size:15px}.stat span{font-size:11px;color:var(--muted)}
+a{color:var(--accent);text-decoration:none}.ota{display:flex;gap:10px}.ota a{flex:1;text-align:center;background:#191c21;padding:11px;border-radius:12px}
+.small{text-align:center;color:var(--muted);font-size:11px;margin-top:18px}
+</style></head><body><main>
+<div class="top"><div class="brand">WiFi Receiver S3</div><div class="live" id="live">WAITING</div></div>
+<div class="art"><div class="cover"><div class="wave">)rawliteral");
+  for (int i=0;i<10;i++) s += "<i class='bar'></i>";
+  s += F(R"rawliteral(</div><div class="kicker">WIRELESS AUDIO</div><div class="title" id="track">Android Audio</div><div class="sub" id="sender">Waiting for Android sender</div></div></div>
+<div class="card"><div class="controls">
+<button class="btn" onclick="send({mute:1})">🔇</button>
+<button class="btn" onclick="send({pause:1})">Ⅱ</button>
+<button class="btn play" id="play" onclick="toggle()">▶</button>
+<button class="btn" onclick="send({mute:0})">🔊</button>
+</div></div>
+<div class="card"><div class="row"><span class="label">Output volume</span><b id="vol">100%</b></div><input id="slider" type="range" min="0" max="100" value="100" oninput="volume(this.value)"></div>
+<div class="card status">
+<div class="stat"><b id="conn">Offline</b><span>Connection</span></div>
+<div class="stat"><b>48 kHz</b><span>16-bit stereo</span></div>
+<div class="stat"><b id="buf">0 KB</b><span>Audio buffer</span></div>
+<div class="stat"><b id="drop">0</b><span>Lost packets</span></div>
+</div>
+<div class="card ota"><a href="/update">OTA endpoint</a><a href="/">Refresh</a></div>
+<div class="small">)rawliteral");
   s += HOSTNAME;
-  s += F(".local<br><b>WFAS:</b> v2 / UDP 9090<br><b>Audio:</b> 48 kHz / stereo / 16-bit<br><b>I2S:</b> GPIO ");
-  s += I2S_BCLK; s += "/"; s += I2S_LRCK; s += "/"; s += I2S_DOUT;
-  s += F("</div><div class='card'>Packets: ");
-  s += packetsRx; s += F("<br>Bytes: "); s += bytesRx;
-  s += F("<br>Lost packets: "); s += packetsLost;
-  s += F("<br>Dropped: "); s += packetsDropped;
-  s += F("<br>Underruns: "); s += underruns;
-  s += F("<br>Buffer: "); s += rbAvailable();
-  s += F(" bytes</div><div class='card'><form method='POST' action='/update' enctype='multipart/form-data'>"
-         "<input type='file' name='firmware' accept='.bin'><br><br><button>Upload OTA Firmware</button></form>"
-         "<p class='muted'>Only upload a valid ESP32-S3 firmware image.</p></div></body></html>");
+  s += F(R"rawliteral(.local · UDA1334A · WFAS v2</div>
+<script>
+let paused=false;
+async function send(o){await fetch('/api/control?'+new URLSearchParams(o));refresh()}
+function volume(v){document.getElementById('vol').textContent=v+'%';fetch('/api/control?volume='+v)}
+function toggle(){paused=!paused;send({pause:paused?1:0})}
+async function refresh(){try{let x=await (await fetch('/api/status')).json();
+document.getElementById('live').textContent=x.connected?'LIVE':'WAITING';
+document.getElementById('conn').textContent=x.connected?'Streaming':'Offline';
+document.getElementById('sender').textContent=x.connected?'Android · '+x.sender:'Waiting for Android sender';
+document.getElementById('buf').textContent=Math.round(x.buffer/1024)+' KB';
+document.getElementById('drop').textContent=x.lost;
+document.getElementById('slider').value=x.volume;document.getElementById('vol').textContent=x.volume+'%';
+paused=x.paused;document.getElementById('play').textContent=paused?'▶':'Ⅱ';
+}catch(e){}}setInterval(refresh,1000);refresh();
+</script></main></body></html>)rawliteral");
   return s;
 }
 
@@ -400,6 +474,8 @@ static void handleUpdateDone() {
 
 static void startWeb() {
   web.on("/", HTTP_GET, handleRoot);
+  web.on("/api/status", HTTP_GET, handleApiStatus);
+  web.on("/api/control", HTTP_GET, handleApiControl);
   web.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   web.begin();
 }
