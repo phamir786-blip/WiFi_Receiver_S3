@@ -17,7 +17,7 @@ jobs:
         run: pip install platformio
       - name: Build firmware
         run: pio run -e esp32-s3-devkitc-1
-      - name: Create merged flash image
+      - name: Create compact merged flash image
         run: |
           BUILD="$PWD/.pio/build/esp32-s3-devkitc-1"
           python - <<'PY'
@@ -31,24 +31,27 @@ jobs:
               (0xE000, framework / "tools/partitions/boot_app0.bin"),
               (0x10000, build / "firmware.bin"),
           ]
+
           for offset, path in inputs:
               if not path.is_file():
                   raise SystemExit(f"Missing required binary: {path}")
 
-          flash_size = 16 * 1024 * 1024
+          # Build only through the last populated byte. Do not pad to the
+          # physical 16 MB flash size.
           end = max(offset + path.stat().st_size for offset, path in inputs)
-          if end > flash_size:
-              raise SystemExit(f"Images exceed 16MB flash: 0x{end:X}")
-
           out = build / "WiFi_Receiver_S3-N16R8-merged.bin"
-          data = bytearray([0xFF]) * flash_size
+
+          data = bytearray([0xFF]) * end
           for offset, path in inputs:
               blob = path.read_bytes()
               data[offset:offset + len(blob)] = blob
 
           out.write_bytes(data)
-          print(f"Created {out} ({out.stat().st_size} bytes)")
-          if out.stat().st_size != flash_size:
+          actual_size = out.stat().st_size
+          print(f"Created {out} ({actual_size} bytes / {actual_size / 1024:.1f} KiB)")
+          print(f"Image range: 0x00000000 - 0x{end - 1:08X}")
+
+          if actual_size != end:
               raise SystemExit("Merged BIN size verification failed")
           PY
           test -s "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin"
