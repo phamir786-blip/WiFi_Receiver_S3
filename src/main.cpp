@@ -331,7 +331,7 @@ static void serviceUdp() {
 
     wfas_packet_type type = wfas_classify(packet, n);
     if (type == WFAS_PKT_AUDIO) {
-      handleAudioPacket(from, packet, packet, n); // corrected below
+      handleAudioPacket(from, packet, n);
     } else {
       char text[512];
       size_t m = min(n, sizeof(text) - 1);
