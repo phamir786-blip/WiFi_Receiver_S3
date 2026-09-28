@@ -17,6 +17,17 @@ jobs:
         run: pip install platformio
       - name: Build firmware
         run: pio run -e esp32-s3-devkitc-1
+      - name: Verify generated image inputs
+        run: |
+          BUILD="$PWD/.pio/build/esp32-s3-devkitc-1"
+          test -s "$BUILD/bootloader.bin"
+          test -s "$BUILD/partitions.bin"
+          test -s "$BUILD/firmware.bin"
+          test -s "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+          echo "bootloader: $(stat -c%s "$BUILD/bootloader.bin") bytes"
+          echo "partitions:  $(stat -c%s "$BUILD/partitions.bin") bytes"
+          echo "firmware:    $(stat -c%s "$BUILD/firmware.bin") bytes"
+
       - name: Create compact merged flash image
         run: |
           BUILD="$PWD/.pio/build/esp32-s3-devkitc-1"
