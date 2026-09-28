@@ -41,7 +41,7 @@ jobs:
               raise SystemExit(f"Images exceed 16MB flash: 0x{end:X}")
 
           out = build / "WiFi_Receiver_S3-N16R8-merged.bin"
-          data = bytearray(b"\\xFF") * flash_size
+          data = bytearray([0xFF]) * flash_size
           for offset, path in inputs:
               blob = path.read_bytes()
               data[offset:offset + len(blob)] = blob
