@@ -18,28 +18,40 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32-s3-devkitc-1
       - name: Create merged flash image
-        shell: bash
         run: |
           BUILD="$PWD/.pio/build/esp32-s3-devkitc-1"
-          FRAMEWORK="$HOME/.platformio/packages/framework-arduinoespressif32"
-          test -f "$BUILD/bootloader.bin"
-          test -f "$BUILD/partitions.bin"
-          test -f "$BUILD/firmware.bin"
-          test -f "$FRAMEWORK/tools/partitions/boot_app0.bin"
-          pio pkg exec --package "platformio/tool-esptoolpy" -- esptool.py \
-            --chip esp32s3 merge_bin \
-            -o "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin" \
-            --pad-to-size 16MB \
-            --flash-mode keep \
-            --flash-freq keep \
-            --flash-size keep \
-            0x0000 "$BUILD/bootloader.bin" \
-            0x8000 "$BUILD/partitions.bin" \
-            0xE000 "$FRAMEWORK/tools/partitions/boot_app0.bin" \
-            0x10000 "$BUILD/firmware.bin"
-          test -s "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin"
-          ls -lh "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin"
+          python - <<'PY'
+          from pathlib import Path
 
+          build = Path(".pio/build/esp32-s3-devkitc-1")
+          framework = Path.home() / ".platformio/packages/framework-arduinoespressif32"
+          inputs = [
+              (0x0000, build / "bootloader.bin"),
+              (0x8000, build / "partitions.bin"),
+              (0xE000, framework / "tools/partitions/boot_app0.bin"),
+              (0x10000, build / "firmware.bin"),
+          ]
+          for offset, path in inputs:
+              if not path.is_file():
+                  raise SystemExit(f"Missing required binary: {path}")
+
+          flash_size = 16 * 1024 * 1024
+          end = max(offset + path.stat().st_size for offset, path in inputs)
+          if end > flash_size:
+              raise SystemExit(f"Images exceed 16MB flash: 0x{end:X}")
+
+          out = build / "WiFi_Receiver_S3-N16R8-merged.bin"
+          data = bytearray(b"\\xFF") * flash_size
+          for offset, path in inputs:
+              blob = path.read_bytes()
+              data[offset:offset + len(blob)] = blob
+
+          out.write_bytes(data)
+          print(f"Created {out} ({out.stat().st_size} bytes)")
+          if out.stat().st_size != flash_size:
+              raise SystemExit("Merged BIN size verification failed")
+          PY
+          test -s "$BUILD/WiFi_Receiver_S3-N16R8-merged.bin"
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
