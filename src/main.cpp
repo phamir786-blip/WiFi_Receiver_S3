@@ -42,8 +42,8 @@ portMUX_TYPE rbMux = portMUX_INITIALIZER_UNLOCKED;
 static void rbClear(){portENTER_CRITICAL(&rbMux);head=tail=count=0;portEXIT_CRITICAL(&rbMux);}
 static size_t rbAvail(){portENTER_CRITICAL(&rbMux);size_t n=count;portEXIT_CRITICAL(&rbMux);return n;}
 static size_t rbFree(){portENTER_CRITICAL(&rbMux);size_t n=RB_SIZE-count;portEXIT_CRITICAL(&rbMux);return n;}
-static size_t rbPut(const uint8_t*p,size_t n){portENTER_CRITICAL(&rbMux);size_t w=min(n,RB_SIZE-count),a=min(w,RB_SIZE-head);memcpy(rb+head,p,a);if(w>a)memcpy(rb,p+a,w-a);head=(head+w)%RB_SIZE;count+=w;portEXIT_CRITICAL(&rbMux);return w;}
-static size_t rbGet(uint8_t*p,size_t n){portENTER_CRITICAL(&rbMux);size_t r=min(n,count),a=min(r,RB_SIZE-tail);memcpy(p,rb+tail,a);if(r>a)memcpy(p+a,rb,r-a);tail=(tail+r)%RB_SIZE;count-=r;portEXIT_CRITICAL(&rbMux);return r;}
+static size_t rbPut(const uint8_t*p,size_t n){portENTER_CRITICAL(&rbMux);size_t c=count;size_t w=min(n,RB_SIZE-c);size_t h=head;size_t a=min(w,RB_SIZE-h);memcpy(rb+h,p,a);if(w>a)memcpy(rb,p+a,w-a);head=(h+w)%RB_SIZE;count=c+w;portEXIT_CRITICAL(&rbMux);return w;}
+static size_t rbGet(uint8_t*p,size_t n){portENTER_CRITICAL(&rbMux);size_t c=count;size_t t=tail;size_t r=min(n,c);size_t a=min(r,RB_SIZE-t);memcpy(p,rb+t,a);if(r>a)memcpy(p+a,rb,r-a);tail=(t+r)%RB_SIZE;count=c-r;portEXIT_CRITICAL(&rbMux);return r;}
 
 static bool setupI2S(uint32_t rate,uint8_t channels){
   if(rate<8000||rate>192000||channels<1||channels>2)return false;
@@ -91,14 +91,14 @@ static void stopSession(const char*why){
 }
 
 static bool startUnicast(const IPAddress&ip,uint16_t port,uint32_t rate,uint8_t channels){
-  audio.stop();if(!audio.begin(0))return false;peer=ip;peerPort=port;multicastSession=false;session=false;haveExpected=false;rbClear();
+  audio.stop();if(!audio.begin(0))return false;peer=ip;peerPort=port;multicastSession=false;session=true;lastAudio=0;haveExpected=false;rbClear();
   setupI2S(rate,channels);sendHello();
   Serial.printf("[WFAS] unicast -> %s:%u local=%u\n",peer.toString().c_str(),peerPort,audio.localPort());return true;
 }
 
 static bool startMulticast(uint16_t port,uint32_t rate,uint8_t channels){
   IPAddress group;group.fromString(MCAST);audio.stop();
-  if(!audio.beginMulticast(WiFi.localIP(),group,port))return false;
+  if(!audio.beginMulticast(group,port))return false;
   peerPort=port;multicastSession=true;session=true;haveExpected=false;rbClear();setupI2S(rate,channels);
   Serial.printf("[WFAS] multicast joined %s:%u\n",MCAST,port);return true;
 }
@@ -183,7 +183,7 @@ void setup(){
   setupI2S(DEFAULT_SR,DEFAULT_CH);xTaskCreatePinnedToCore(audioTask,"WFAS-AUDIO",8192,nullptr,20,nullptr,0);
   connectWiFi();if(WiFi.status()!=WL_CONNECTED)return;
   IPAddress group;group.fromString(MCAST);
-  if(discovery.beginMulticast(WiFi.localIP(),group,DISCOVERY_PORT))Serial.printf("[DISCOVERY] listening %s:%u\n",MCAST,DISCOVERY_PORT);
+  if(discovery.beginMulticast(group,DISCOVERY_PORT))Serial.printf("[DISCOVERY] listening %s:%u\n",MCAST,DISCOVERY_PORT);
   else Serial.println("[DISCOVERY] multicast join FAILED");
   Serial.println("[READY] waiting for WiFiAudioStreaming-Android v1.2");
 }
