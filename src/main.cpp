@@ -16,6 +16,7 @@ static constexpr char WIFI_SSID[] = "GFiber_2.4_Coverage_AECD9";
 static constexpr char WIFI_PASSWORD[] = "006BF4FD";
 static constexpr char HOSTNAME[] = "wifi-receiver-s3";
 static constexpr char MCAST[] = "239.255.0.1";
+static constexpr uint16_t STREAM_PORT = 9090;
 static constexpr uint16_t DISCOVERY_PORT = 9091;
 static constexpr uint32_t DEFAULT_SR = 48000;
 static constexpr uint8_t DEFAULT_CH = 2;
@@ -99,7 +100,7 @@ static void stopSession(const char*why){
 }
 
 static bool startUnicast(const IPAddress&ip,uint16_t port,uint32_t rate,uint8_t channels){
-  audio.stop();if(!audio.begin(0))return false;peer=ip;peerPort=port;multicastSession=false;session=true;lastAudio=0;haveExpected=false;rbClear();
+  audio.stop();if(!audio.begin(STREAM_PORT))return false;peer=ip;peerPort=port;multicastSession=false;session=true;lastAudio=0;haveExpected=false;rbClear();
   setupI2S(rate,channels);sendHello();
   Serial.printf("[WFAS] unicast -> %s:%u | HELLO sent\n",peer.toString().c_str(),peerPort);return true;
 }
