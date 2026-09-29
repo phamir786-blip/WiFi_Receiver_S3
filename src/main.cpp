@@ -93,7 +93,7 @@ static void stopSession(const char*why){
 static bool startUnicast(const IPAddress&ip,uint16_t port,uint32_t rate,uint8_t channels){
   audio.stop();if(!audio.begin(0))return false;peer=ip;peerPort=port;multicastSession=false;session=true;lastAudio=0;haveExpected=false;rbClear();
   setupI2S(rate,channels);sendHello();
-  Serial.printf("[WFAS] unicast -> %s:%u local=%u\n",peer.toString().c_str(),peerPort,audio.localPort());return true;
+  Serial.printf("[WFAS] unicast -> %s:%u | HELLO sent\n",peer.toString().c_str(),peerPort);return true;
 }
 
 static bool startMulticast(uint16_t port,uint32_t rate,uint8_t channels){
