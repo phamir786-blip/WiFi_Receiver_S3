@@ -71,9 +71,12 @@ static void audioTask(void*){
   uint8_t block[4096],zero[4096]={};bool primed=false;
   for(;;){
     if(!i2sReady){vTaskDelay(pdMS_TO_TICKS(20));continue;}
+    if(uiPaused||uiMuted){i2s_write(I2S_NUM_0,zero,sizeof(zero),nullptr,portMAX_DELAY);vTaskDelay(pdMS_TO_TICKS(2));continue;}
     if(!primed){if(rbAvail()<PREBUFFER){vTaskDelay(pdMS_TO_TICKS(2));continue;}primed=true;}
     size_t n=rbGet(block,sizeof(block));
     if(!n){underruns++;i2s_write(I2S_NUM_0,zero,sizeof(zero),nullptr,portMAX_DELAY);primed=false;continue;}
+    uint8_t v=uiVolume;
+    if(v<100){int16_t* pcm=(int16_t*)block;size_t samples=n/2;for(size_t i=0;i<samples;i++)pcm[i]=(int16_t)(((int32_t)pcm[i]*v)/100);}
     i2s_write(I2S_NUM_0,block,n,nullptr,portMAX_DELAY);
     if(rbAvail()<4096)primed=false;
   }
@@ -186,6 +189,31 @@ static void connectWiFi(){
   if(MDNS.begin(HOSTNAME))Serial.printf("[mDNS] %s.local\n",HOSTNAME);
 }
 
+static bool webReady=false;
+static bool discoveryReady=false;
+static bool mdnsReady=false;
+static uint32_t lastWiFiAttempt=0;
+
+static void ensureNetworkServices(){
+  if(WiFi.status()!=WL_CONNECTED)return;
+  if(!mdnsReady){
+    if(MDNS.begin(HOSTNAME)){
+      mdnsReady=true;
+      MDNS.addService("http","tcp",80);
+      Serial.printf("[mDNS] http://%s.local/\n",HOSTNAME);
+    }else Serial.println("[mDNS] start failed; will retry");
+  }
+  if(!webReady){startWeb();webReady=true;}
+  if(!discoveryReady){
+    IPAddress group;group.fromString(MCAST);
+    if(discovery.beginMulticast(group,DISCOVERY_PORT)){
+      discoveryReady=true;
+      Serial.printf("[DISCOVERY] listening %s:%u\n",MCAST,DISCOVERY_PORT);
+      Serial.println("[READY] waiting for WiFiAudioStreaming-Android v1.2");
+    }else Serial.println("[DISCOVERY] multicast join FAILED; will retry");
+  }
+}
+
 void setup(){
   Serial.begin(115200);delay(300);
   Serial.println("\n=== WiFi_Receiver_S3 | WFAS v2 | AUTO RECEIVER ===");
@@ -194,16 +222,16 @@ void setup(){
   if(!rb)rb=(uint8_t*)heap_caps_malloc(RB_SIZE,MALLOC_CAP_8BIT);
   if(!rb){Serial.println("[FATAL] audio buffer allocation failed");while(true)delay(1000);}rbClear();
   setupI2S(DEFAULT_SR,DEFAULT_CH);xTaskCreatePinnedToCore(audioTask,"WFAS-AUDIO",8192,nullptr,20,nullptr,0);
-  connectWiFi();if(WiFi.status()!=WL_CONNECTED)return;
-  MDNS.addService("http","tcp",80); startWeb();
-  IPAddress group;group.fromString(MCAST);
-  if(discovery.beginMulticast(group,DISCOVERY_PORT))Serial.printf("[DISCOVERY] listening %s:%u\n",MCAST,DISCOVERY_PORT);
-  else Serial.println("[DISCOVERY] multicast join FAILED");
-  Serial.println("[READY] waiting for WiFiAudioStreaming-Android v1.2");
+  connectWiFi();
+  ensureNetworkServices();
 }
 
 void loop(){
-  if(WiFi.status()!=WL_CONNECTED){static uint32_t retry=0;if(millis()-retry>5000){retry=millis();WiFi.reconnect();}delay(10);return;}
+  if(WiFi.status()!=WL_CONNECTED){
+    if(millis()-lastWiFiAttempt>5000){lastWiFiAttempt=millis();Serial.println("[WiFi] reconnecting...");WiFi.reconnect();}
+    delay(10);return;
+  }
+  ensureNetworkServices();
   serviceDiscovery();serviceAudio();web.handleClient();
   if(session&&!multicastSession&&!lastAudio&&millis()-lastHello>1500)sendHello();
   if(session&&!multicastSession&&lastAudio&&millis()-lastAudio>5000)stopSession("audio timeout");
