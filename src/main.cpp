@@ -12,8 +12,8 @@
 // Boot -> Wi-Fi -> discovery -> unicast HELLO or multicast join -> PCM -> UDA1334A.
 // UDA1334A: BCLK GPIO4, LRCK GPIO5, DIN GPIO21.
 
-static constexpr char WIFI_SSID[] = "YOUR_WIFI_SSID";
-static constexpr char WIFI_PASSWORD[] = "YOUR_WIFI_PASSWORD";
+static constexpr char WIFI_SSID[] = "GFiber_2.4_Coverage_AECD9";
+static constexpr char WIFI_PASSWORD[] = "006BF4FD";
 static constexpr char HOSTNAME[] = "wifi-receiver-s3";
 static constexpr char MCAST[] = "239.255.0.1";
 static constexpr uint16_t DISCOVERY_PORT = 9091;
