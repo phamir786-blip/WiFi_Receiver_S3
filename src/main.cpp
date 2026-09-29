@@ -181,12 +181,14 @@ static void handleUpdateDone(){web.sendHeader("Connection","close");web.send(200
 static void startWeb(){web.on("/",HTTP_GET,handleRoot);web.on("/api/status",HTTP_GET,handleApiStatus);web.on("/api/control",HTTP_GET,handleApiControl);web.on("/update",HTTP_GET,handleUpdatePage);web.on("/update",HTTP_POST,handleUpdateDone,handleUpdateUpload);web.begin();Serial.println("[WEB] Dashboard ready");}
 
 static void connectWiFi(){
-  WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setHostname(HOSTNAME);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
-  Serial.printf("[WiFi] connecting to %s",WIFI_SSID);uint32_t t=millis();
-  while(WiFi.status()!=WL_CONNECTED&&millis()-t<30000){delay(250);Serial.print('.');}Serial.println();
-  if(WiFi.status()!=WL_CONNECTED)return;
-  Serial.printf("[WiFi] %s RSSI=%d\n",WiFi.localIP().toString().c_str(),WiFi.RSSI());
-  if(MDNS.begin(HOSTNAME))Serial.printf("[mDNS] %s.local\n",HOSTNAME);
+  WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.setHostname(HOSTNAME);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("[WiFi] connecting to %s", WIFI_SSID);
+  uint32_t t=millis();
+  while(WiFi.status()!=WL_CONNECTED && millis()-t<30000){ delay(250); Serial.print('.'); }
+  Serial.println();
+  if(WiFi.status()!=WL_CONNECTED){ Serial.printf("[WiFi] FAILED status=%d\n",(int)WiFi.status()); return; }
+  Serial.printf("[WiFi] CONNECTED IP=%s RSSI=%d\n",WiFi.localIP().toString().c_str(),WiFi.RSSI());
 }
 
 static bool webReady=false;
@@ -196,21 +198,21 @@ static uint32_t lastWiFiAttempt=0;
 
 static void ensureNetworkServices(){
   if(WiFi.status()!=WL_CONNECTED)return;
+  // HTTP dashboard is mandatory; mDNS/discovery failures must not block it.
+  if(!webReady){ startWeb(); webReady=true; }
   if(!mdnsReady){
     if(MDNS.begin(HOSTNAME)){
       mdnsReady=true;
       MDNS.addService("http","tcp",80);
       Serial.printf("[mDNS] http://%s.local/\n",HOSTNAME);
-    }else Serial.println("[mDNS] start failed; will retry");
+    }else Serial.println("[mDNS] unavailable; use the IP address");
   }
-  if(!webReady){startWeb();webReady=true;}
   if(!discoveryReady){
-    IPAddress group;group.fromString(MCAST);
+    IPAddress group; group.fromString(MCAST);
     if(discovery.beginMulticast(group,DISCOVERY_PORT)){
       discoveryReady=true;
       Serial.printf("[DISCOVERY] listening %s:%u\n",MCAST,DISCOVERY_PORT);
-      Serial.println("[READY] waiting for WiFiAudioStreaming-Android v1.2");
-    }else Serial.println("[DISCOVERY] multicast join FAILED; will retry");
+    }else Serial.println("[DISCOVERY] multicast join failed; retrying");
   }
 }
 
